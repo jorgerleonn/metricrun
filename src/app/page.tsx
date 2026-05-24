@@ -51,7 +51,10 @@ export default function DashboardPage() {
 
   useEffect(() => {
     if (!isLoaded) return
-    if (!isSignedIn || !user) return
+    if (!isSignedIn || !user) {
+      setLoading(false)
+      return
+    }
 
     fetchRuns(user.id)
       .then(setRuns)

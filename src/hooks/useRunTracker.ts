@@ -3,8 +3,7 @@
 import { useState, useRef, useCallback, useEffect } from "react"
 import type { RoutePoint, TrackerStatus, LiveMetrics } from "@/lib/types"
 import { isGpsPointValid, calculateTotalDistance, calculatePace } from "@/lib/gps-utils"
-
-const SMOOTH_DISTANCE_M = 0.008
+import { loadSession, saveSession, clearSession } from "@/lib/tracker-storage"
 
 export function useRunTracker() {
   const [status, setStatus] = useState<TrackerStatus>("idle")
@@ -15,6 +14,8 @@ export function useRunTracker() {
     distanceKm: 0,
     currentPaceMinPerKm: null,
   })
+  const [hasSavedSession, setHasSavedSession] = useState(false)
+  const savedSessionRef = useRef<ReturnType<typeof loadSession>>(null)
 
   const watchIdRef = useRef<number | null>(null)
   const startTimeRef = useRef<number | null>(null)
@@ -25,7 +26,39 @@ export function useRunTracker() {
   const lastValidRef = useRef<RoutePoint | null>(null)
   const paceWindowRef = useRef<RoutePoint[]>([])
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const checkpointRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const smoothCounterRef = useRef(0)
+  const finishedResultRef = useRef<{
+    points: RoutePoint[]
+    totalDistanceKm: number
+    totalDurationSeconds: number
+  } | null>(null)
+
+  const storeCheckpoint = useCallback(() => {
+    const s = status
+    if (s !== "recording" && s !== "paused") return
+    if (!startTimeRef.current) return
+
+    saveSession({
+      positions: positionsRef.current,
+      startTime: startTimeRef.current,
+      elapsedPaused: elapsedPausedRef.current,
+      status: s as "recording" | "paused",
+      updatedAt: Date.now(),
+    })
+  }, [status])
+
+  const startCheckpointInterval = useCallback(() => {
+    storeCheckpoint()
+    checkpointRef.current = setInterval(storeCheckpoint, 5000)
+  }, [storeCheckpoint])
+
+  const stopCheckpointInterval = useCallback(() => {
+    if (checkpointRef.current != null) {
+      clearInterval(checkpointRef.current)
+      checkpointRef.current = null
+    }
+  }, [])
 
   const clearWatch = useCallback(() => {
     if (watchIdRef.current != null) {
@@ -46,7 +79,7 @@ export function useRunTracker() {
       try {
         wakeLockRef.current = await (navigator as any).wakeLock.request("screen")
       } catch {
-        // Wake lock not available, silently continue
+        // Wake lock not available
       }
     }
   }, [])
@@ -81,26 +114,7 @@ export function useRunTracker() {
     tickRef.current = setInterval(tick, 1000)
   }, [tick])
 
-  const start = useCallback(() => {
-    setError(null)
-    setStatus("requesting")
-
-    if (!navigator.geolocation) {
-      setError("Tu navegador no soporta geolocalización")
-      setStatus("error")
-      return
-    }
-
-    requestWakeLock()
-
-    const now = Date.now()
-    startTimeRef.current = now
-    elapsedPausedRef.current = 0
-    positionsRef.current = []
-    lastValidRef.current = null
-    paceWindowRef.current = []
-    smoothCounterRef.current = 0
-
+  const startWatching = useCallback(() => {
     watchIdRef.current = navigator.geolocation.watchPosition(
       (pos) => {
         const point: RoutePoint = {
@@ -122,31 +136,84 @@ export function useRunTracker() {
         paceWindowRef.current = [...paceWindowRef.current, point].slice(-10)
         setPositions(updated)
       },
-      (err) => {
-        setError(`Error de GPS: ${err.message}`)
-        setStatus("error")
-        clearWatch()
-        stopTicker()
-        releaseWakeLock()
-      },
+      () => {},
       {
         enableHighAccuracy: true,
         maximumAge: 0,
         timeout: 10000,
       }
     )
+  }, [])
+
+  const start = useCallback(() => {
+    setError(null)
+    setStatus("requesting")
+
+    if (!navigator.geolocation) {
+      setError("Tu navegador no soporta geolocalización")
+      setStatus("error")
+      return
+    }
+
+    clearSession()
+    savedSessionRef.current = null
+    setHasSavedSession(false)
+    requestWakeLock()
+
+    const now = Date.now()
+    startTimeRef.current = now
+    elapsedPausedRef.current = 0
+    positionsRef.current = []
+    lastValidRef.current = null
+    paceWindowRef.current = []
+    smoothCounterRef.current = 0
+    finishedResultRef.current = null
+
+    startWatching()
 
     setStatus("recording")
     startTicker()
-  }, [requestWakeLock, clearWatch, stopTicker, releaseWakeLock, startTicker])
+    startCheckpointInterval()
+  }, [requestWakeLock, startTicker, startCheckpointInterval, startWatching])
+
+  const restore = useCallback(() => {
+    const session = savedSessionRef.current
+    if (!session) return
+
+    setError(null)
+    setHasSavedSession(false)
+    savedSessionRef.current = null
+    requestWakeLock()
+
+    startTimeRef.current = session.startTime
+    elapsedPausedRef.current = session.elapsedPaused
+    positionsRef.current = [...session.positions]
+    lastValidRef.current =
+      session.positions.length > 0
+        ? session.positions[session.positions.length - 1]
+        : null
+    paceWindowRef.current = []
+    smoothCounterRef.current = 0
+    finishedResultRef.current = null
+
+    setPositions([...session.positions])
+
+    startWatching()
+    setStatus("recording")
+    startTicker()
+    startCheckpointInterval()
+  }, [requestWakeLock, startTicker, startCheckpointInterval, startWatching])
 
   const pause = useCallback(() => {
     if (status !== "recording") return
     clearWatch()
     stopTicker()
+    stopCheckpointInterval()
     pauseStartRef.current = Date.now()
+
+    storeCheckpoint()
     setStatus("paused")
-  }, [status, clearWatch, stopTicker])
+  }, [status, clearWatch, stopTicker, stopCheckpointInterval, storeCheckpoint])
 
   const resume = useCallback(() => {
     if (status !== "paused") return
@@ -155,70 +222,88 @@ export function useRunTracker() {
       pauseStartRef.current = null
     }
 
-    watchIdRef.current = navigator.geolocation.watchPosition(
-      (pos) => {
-        const point: RoutePoint = {
-          lat: pos.coords.latitude,
-          lng: pos.coords.longitude,
-          timestamp: pos.timestamp,
-          accuracy: pos.coords.accuracy ?? undefined,
-        }
-
-        if (!isGpsPointValid(point, lastValidRef.current)) return
-        lastValidRef.current = point
-
-        const updated = [...positionsRef.current, point]
-        positionsRef.current = updated
-        paceWindowRef.current = [...paceWindowRef.current, point].slice(-10)
-        setPositions(updated)
-      },
-      () => {},
-      {
-        enableHighAccuracy: true,
-        maximumAge: 0,
-        timeout: 10000,
-      }
-    )
-
+    startWatching()
     setStatus("recording")
     startTicker()
-  }, [status, startTicker])
+    startCheckpointInterval()
+  }, [status, startTicker, startCheckpointInterval, startWatching])
 
   const stop = useCallback(() => {
     clearWatch()
     stopTicker()
+    stopCheckpointInterval()
     releaseWakeLock()
     pauseStartRef.current = null
+    clearSession()
 
     const totalDistanceKm = calculateTotalDistance(positionsRef.current)
     const totalDurationMs = Date.now() - (startTimeRef.current ?? Date.now()) - elapsedPausedRef.current
     const totalDurationSeconds = Math.round(totalDurationMs / 1000)
 
-    setStatus("finished")
-
-    return {
-      points: positionsRef.current,
+    const result = {
+      points: [...positionsRef.current],
       totalDistanceKm: Math.round(totalDistanceKm * 100) / 100,
       totalDurationSeconds,
     }
-  }, [clearWatch, stopTicker, releaseWakeLock])
+
+    finishedResultRef.current = result
+    setStatus("finished")
+
+    return result
+  }, [clearWatch, stopTicker, stopCheckpointInterval, releaseWakeLock])
+
+  const getFinishedResult = useCallback(() => {
+    return finishedResultRef.current
+  }, [])
+
+  useEffect(() => {
+    const session = loadSession()
+    if (session) {
+      savedSessionRef.current = session
+      setHasSavedSession(true)
+    }
+  }, [])
+
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (document.hidden) {
+        storeCheckpoint()
+      }
+    }
+
+    const handleBeforeUnload = () => {
+      storeCheckpoint()
+    }
+
+    document.addEventListener("visibilitychange", handleVisibility)
+    window.addEventListener("beforeunload", handleBeforeUnload)
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibility)
+      window.removeEventListener("beforeunload", handleBeforeUnload)
+    }
+  }, [storeCheckpoint])
 
   useEffect(() => {
     return () => {
       clearWatch()
       stopTicker()
+      stopCheckpointInterval()
       releaseWakeLock()
     }
-  }, [clearWatch, stopTicker, releaseWakeLock])
+  }, [clearWatch, stopTicker, stopCheckpointInterval, releaseWakeLock])
 
   return {
     status,
     positions,
     error,
     liveMetrics,
+    hasSavedSession,
     start,
+    restore,
     pause,
     resume,
     stop,
+    getFinishedResult,
   }
 }

@@ -22,13 +22,18 @@ const MapView = dynamic(
 export default function RunTracker() {
   const router = useRouter()
   const { user } = useUser()
-  const { status, positions, error, liveMetrics, start, pause, resume, stop } = useRunTracker()
+  const { status, positions, error, liveMetrics, hasSavedSession, start, restore, pause, resume, stop, getFinishedResult } = useRunTracker()
   const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
 
   const handleStart = useCallback(() => {
     start()
   }, [start])
+
+  const handleRestore = useCallback(() => {
+    restore()
+  }, [restore])
 
   const handlePause = useCallback(() => {
     pause()
@@ -38,31 +43,42 @@ export default function RunTracker() {
     resume()
   }, [resume])
 
-  const handleStop = useCallback(async () => {
-    const result = stop()
-    if (!result || !user) return
+  const handleStopTracking = useCallback(() => {
+    stop()
+  }, [stop])
+
+  const handleSave = useCallback(async () => {
+    if (!user) return
+
+    const result = getFinishedResult()
+    if (!result || result.points.length === 0) {
+      setSaveError("No hay datos de ruta para guardar")
+      return
+    }
 
     setSaving(true)
-    try {
-      const routeData = {
-        points: result.points,
-        totalDistanceKm: result.totalDistanceKm,
-        totalDurationSeconds: result.totalDurationSeconds,
-      }
+    setSaveError(null)
 
+    try {
       const run: Omit<Run, "id"> = {
         distanceKm: result.totalDistanceKm,
         durationSeconds: result.totalDurationSeconds,
         date: new Date().toISOString().split("T")[0],
-        routeData,
+        routeData: {
+          points: result.points,
+          totalDistanceKm: result.totalDistanceKm,
+          totalDurationSeconds: result.totalDurationSeconds,
+        },
       }
 
       await insertRun(run, user.id)
       setSaved(true)
-    } catch {
+    } catch (err) {
+      console.error("Error saving run:", err)
+      setSaveError("Error al guardar. Intenta de nuevo.")
       setSaving(false)
     }
-  }, [stop, user])
+  }, [user, getFinishedResult])
 
   const handleBack = useCallback(() => {
     router.push("/")
@@ -95,7 +111,7 @@ export default function RunTracker() {
     <div className="relative h-dvh w-full overflow-hidden bg-neutral-950">
       <MapView positions={positions} />
 
-      {status === "idle" && (
+      {status === "idle" && !hasSavedSession && (
         <div className="absolute inset-0 z-[1000] flex flex-col items-center justify-center gap-6 bg-neutral-950/60 backdrop-blur-sm">
           <div className="flex h-20 w-20 items-center justify-center rounded-full border-2 border-cyan-400/50">
             <Route className="h-10 w-10 text-cyan-400" />
@@ -108,6 +124,33 @@ export default function RunTracker() {
           >
             <Play className="ml-1 h-8 w-8 text-white" />
           </button>
+        </div>
+      )}
+
+      {status === "idle" && hasSavedSession && (
+        <div className="absolute inset-0 z-[1000] flex flex-col items-center justify-center gap-6 bg-neutral-950/60 backdrop-blur-sm px-6">
+          <div className="flex h-20 w-20 items-center justify-center rounded-full border-2 border-amber-400/50">
+            <Route className="h-10 w-10 text-amber-400" />
+          </div>
+          <p className="text-lg font-medium">Carrera en pausa</p>
+          <p className="text-center text-sm text-muted-foreground">
+          Tienes una carrera guardada localmente. ¿Quieres continuar o empezar una nueva?
+          </p>
+          <div className="flex gap-4">
+            <button
+              onClick={handleRestore}
+              className="inline-flex h-12 items-center justify-center gap-2 rounded-full bg-amber-500 px-8 text-sm font-medium text-white shadow-lg transition-all hover:bg-amber-600 active:scale-95"
+            >
+              <Play className="h-5 w-5" />
+              Continuar
+            </button>
+            <button
+              onClick={handleStart}
+              className="inline-flex h-12 items-center justify-center rounded-full border border-white/10 px-8 text-sm font-medium transition-colors hover:bg-white/5"
+            >
+              Nueva
+            </button>
+          </div>
         </div>
       )}
 
@@ -137,26 +180,18 @@ export default function RunTracker() {
             <div className="mx-auto max-w-md rounded-2xl border border-white/10 bg-neutral-950/80 px-6 py-4 backdrop-blur-xl">
               <div className="grid grid-cols-3 gap-4 text-center">
                 <div>
-                  <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                    Tiempo
-                  </p>
-                  <p className="mt-1 text-xl font-bold tabular-nums">
-                    {formatElapsed(liveMetrics.elapsedSeconds)}
-                  </p>
+                  <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Tiempo</p>
+                  <p className="mt-1 text-xl font-bold tabular-nums">{formatElapsed(liveMetrics.elapsedSeconds)}</p>
                 </div>
                 <div>
-                  <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                    Distancia
-                  </p>
+                  <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Distancia</p>
                   <p className="mt-1 text-xl font-bold tabular-nums">
                     {liveMetrics.distanceKm.toFixed(2)}
                     <span className="text-xs font-normal text-muted-foreground"> km</span>
                   </p>
                 </div>
                 <div>
-                  <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                    Ritmo
-                  </p>
+                  <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Ritmo</p>
                   <p className="mt-1 text-xl font-bold tabular-nums">
                     {formatPace(liveMetrics.currentPaceMinPerKm)}
                     <span className="text-xs font-normal text-muted-foreground"> /km</span>
@@ -186,7 +221,7 @@ export default function RunTracker() {
                 <Play className="ml-1 h-6 w-6 text-white" />
               </button>
               <button
-                onClick={handleStop}
+                onClick={handleStopTracking}
                 className="flex h-14 w-14 items-center justify-center rounded-full bg-red-500/80 backdrop-blur-xl transition-all hover:bg-red-500 active:scale-95"
               >
                 <Square className="h-6 w-6 text-white" />
@@ -214,20 +249,24 @@ export default function RunTracker() {
               </div>
             </div>
           </div>
+
+          {saveError && (
+            <p className="text-sm text-red-400">{saveError}</p>
+          )}
+
           <div className="flex gap-4">
             <button
-              onClick={handleStop}
-              className="inline-flex h-10 items-center justify-center rounded-md bg-cyan-500 px-6 text-sm font-medium text-white shadow-lg transition-colors hover:bg-cyan-600"
+              onClick={handleSave}
+              disabled={saving}
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-cyan-500 px-6 text-sm font-medium text-white shadow-lg transition-colors hover:bg-cyan-600 disabled:opacity-50"
             >
-              {saving ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                "Guardar Carrera"
-              )}
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              {saving ? "Guardando..." : "Guardar Carrera"}
             </button>
             <button
               onClick={handleBack}
-              className="inline-flex h-10 items-center justify-center rounded-md border border-white/10 px-6 text-sm font-medium transition-colors hover:bg-white/5"
+              disabled={saving}
+              className="inline-flex h-10 items-center justify-center rounded-md border border-white/10 px-6 text-sm font-medium transition-colors hover:bg-white/5 disabled:opacity-50"
             >
               Descartar
             </button>
