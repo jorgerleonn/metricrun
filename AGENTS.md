@@ -13,3 +13,11 @@ Las variables de entorno necesarias están en `.env.example`:
 Copia `.env.example` a `.env.local` y rellena los valores antes de ejecutar.
 
 La tabla `runs` se crea ejecutando `supabase/schema.sql` en el SQL Editor de Supabase.
+
+## Clerk
+
+Regístrate en https://clerk.com y crea una aplicación. Copia las keys al `.env.local`:
+- `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`
+- `CLERK_SECRET_KEY`
+
+Las rutas de autenticación están en `/sign-in` y `/sign-up`.

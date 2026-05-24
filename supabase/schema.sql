@@ -2,7 +2,7 @@
 
 create table if not exists runs (
   id uuid primary key default gen_random_uuid(),
-  user_id text not null,
+  user_id text not null default '',
   distance_km numeric(5,2) not null,
   duration_seconds integer not null,
   date date not null,
@@ -12,14 +12,25 @@ create table if not exists runs (
   created_at timestamptz not null default now()
 );
 
+-- Migración: añadir user_id si la tabla ya existía sin ella
+alter table runs add column if not exists user_id text not null default '';
+
 create index if not exists idx_runs_user_date on runs (user_id, date desc);
 
 alter table runs enable row level security;
 
-create policy "Users can read own runs"
-  on runs for select
-  using (user_id = current_setting('app.user_id', true));
+do $$ begin
+  create policy "Users can read own runs"
+    on runs for select
+    using (user_id = current_setting('app.user_id', true));
+exception
+  when unique_violation then null;
+end $$;
 
-create policy "Users can insert own runs"
-  on runs for insert
-  with check (user_id = current_setting('app.user_id', true));
+do $$ begin
+  create policy "Users can insert own runs"
+    on runs for insert
+    with check (user_id = current_setting('app.user_id', true));
+exception
+  when unique_violation then null;
+end $$;
