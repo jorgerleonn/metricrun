@@ -3,6 +3,7 @@ import type { Run } from "./types"
 
 interface RunRow {
   id: string
+  user_id: string
   distance_km: number
   duration_seconds: number
   date: string
@@ -23,22 +24,24 @@ function rowToRun(row: RunRow): Run {
   }
 }
 
-export async function fetchRuns(): Promise<Run[]> {
+export async function fetchRuns(userId: string): Promise<Run[]> {
   const supabase = getSupabase()
   const { data, error } = await supabase
     .from("runs")
     .select("*")
+    .eq("user_id", userId)
     .order("date", { ascending: false })
 
   if (error) throw new Error(error.message)
   return (data ?? []).map(rowToRun)
 }
 
-export async function insertRun(run: Omit<Run, "id">): Promise<Run> {
+export async function insertRun(run: Omit<Run, "id">, userId: string): Promise<Run> {
   const supabase = getSupabase()
   const { data, error } = await supabase
     .from("runs")
     .insert({
+      user_id: userId,
       distance_km: run.distanceKm,
       duration_seconds: run.durationSeconds,
       date: run.date,

@@ -1,7 +1,8 @@
 "use client"
 
 import { useEffect, useState, useCallback } from "react"
-import { Route, TrendingUp, Calendar } from "lucide-react"
+import { useUser } from "@clerk/nextjs"
+import { Route, TrendingUp, Calendar, Loader2 } from "lucide-react"
 import { MetricCard } from "@/components/MetricCard"
 import { RunListItem } from "@/components/RunListItem"
 import { AddRunModal } from "@/components/AddRunModal"
@@ -44,35 +45,57 @@ function getDailyDistances(runs: Run[]): DailyDistance[] {
 }
 
 export default function DashboardPage() {
+  const { isLoaded, isSignedIn, user } = useUser()
   const [runs, setRuns] = useState<Run[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    fetchRuns()
+    if (!isLoaded) return
+    if (!isSignedIn || !user) return
+
+    fetchRuns(user.id)
       .then(setRuns)
       .catch((err) => console.error("Error fetching runs:", err))
       .finally(() => setLoading(false))
-  }, [])
+  }, [isLoaded, isSignedIn, user])
 
   const handleAddRun = useCallback(async (run: Omit<Run, "id">) => {
+    if (!user) return
     try {
-      const inserted = await insertRun(run)
+      const inserted = await insertRun(run, user.id)
       setRuns((prev) => [inserted, ...prev])
     } catch (err) {
       console.error("Error inserting run:", err)
     }
-  }, [])
+  }, [user])
 
-  const stats = getWeeklyStats(runs)
-  const dailyData = getDailyDistances(runs)
-
-  if (loading) {
+  if (!isLoaded || loading) {
     return (
       <div className="mx-auto flex max-w-4xl items-center justify-center px-4 py-32">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-cyan-400 border-t-transparent" />
+        <Loader2 className="h-8 w-8 animate-spin text-cyan-400" />
       </div>
     )
   }
+
+  if (!isSignedIn) {
+    return (
+      <div className="mx-auto flex max-w-4xl flex-col items-center justify-center px-4 py-32 text-center">
+        <h1 className="mb-2 text-2xl font-bold">MetricRun</h1>
+        <p className="mb-6 text-muted-foreground">
+          Inicia sesión para registrar tus carreras
+        </p>
+        <a
+          href="/sign-in"
+          className="inline-flex h-10 items-center justify-center rounded-md bg-cyan-500 px-6 text-sm font-medium text-white shadow transition-colors hover:bg-cyan-600"
+        >
+          Iniciar Sesión
+        </a>
+      </div>
+    )
+  }
+
+  const stats = getWeeklyStats(runs)
+  const dailyData = getDailyDistances(runs)
 
   return (
     <div className="mx-auto max-w-4xl space-y-8 px-4 py-8 sm:px-6">
@@ -83,7 +106,21 @@ export default function DashboardPage() {
             Tus entrenamientos de running
           </p>
         </div>
-        <AddRunModal onAddRun={handleAddRun} />
+        <div className="flex items-center gap-4">
+          <AddRunModal onAddRun={handleAddRun} />
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <div className="h-7 w-7 overflow-hidden rounded-full bg-muted">
+              {user.imageUrl && (
+                <img
+                  src={user.imageUrl}
+                  alt=""
+                  className="h-full w-full object-cover"
+                />
+              )}
+            </div>
+            <span className="hidden sm:inline">{user.firstName || user.emailAddresses[0]?.emailAddress}</span>
+          </div>
+        </div>
       </header>
 
       <section className="grid gap-4 sm:grid-cols-3">
