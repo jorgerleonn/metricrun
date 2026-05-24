@@ -1,5 +1,5 @@
 import { getSupabase } from "./supabase"
-import type { Run } from "./types"
+import type { Run, RunRoute } from "./types"
 
 interface RunRow {
   id: string
@@ -10,6 +10,16 @@ interface RunRow {
   notes: string | null
   cadence: number | null
   stride_length_cm: number | null
+  route_data: Record<string, unknown> | null
+}
+
+function parseRouteData(raw: Record<string, unknown> | null): RunRoute | undefined {
+  if (!raw) return undefined
+  return {
+    points: (raw.points as any[]) ?? [],
+    totalDistanceKm: (raw.totalDistanceKm as number) ?? 0,
+    totalDurationSeconds: (raw.totalDurationSeconds as number) ?? 0,
+  }
 }
 
 function rowToRun(row: RunRow): Run {
@@ -21,6 +31,7 @@ function rowToRun(row: RunRow): Run {
     notes: row.notes ?? undefined,
     cadence: row.cadence ?? undefined,
     strideLengthCm: row.stride_length_cm ?? undefined,
+    routeData: parseRouteData(row.route_data),
   }
 }
 
@@ -48,6 +59,7 @@ export async function insertRun(run: Omit<Run, "id">, userId: string): Promise<R
       notes: run.notes ?? null,
       cadence: run.cadence ?? null,
       stride_length_cm: run.strideLengthCm ?? null,
+      route_data: run.routeData ?? null,
     } as never)
     .select()
     .single()

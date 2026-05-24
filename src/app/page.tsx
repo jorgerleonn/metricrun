@@ -1,13 +1,13 @@
 "use client"
 
-import { useEffect, useState, useCallback } from "react"
+import { useEffect, useState } from "react"
 import { useUser } from "@clerk/nextjs"
-import { Route, TrendingUp, Calendar, Loader2 } from "lucide-react"
+import Link from "next/link"
+import { Route, TrendingUp, Calendar, Loader2, Play } from "lucide-react"
 import { MetricCard } from "@/components/MetricCard"
 import { RunListItem } from "@/components/RunListItem"
-import { AddRunModal } from "@/components/AddRunModal"
 import { WeeklyChart } from "@/components/WeeklyChart"
-import { fetchRuns, insertRun } from "@/lib/supabase-queries"
+import { fetchRuns } from "@/lib/supabase-queries"
 import { formatPace } from "@/lib/helpers"
 import type { Run, WeeklyStats, DailyDistance } from "@/lib/types"
 
@@ -59,16 +59,6 @@ export default function DashboardPage() {
       .finally(() => setLoading(false))
   }, [isLoaded, isSignedIn, user])
 
-  const handleAddRun = useCallback(async (run: Omit<Run, "id">) => {
-    if (!user) return
-    try {
-      const inserted = await insertRun(run, user.id)
-      setRuns((prev) => [inserted, ...prev])
-    } catch (err) {
-      console.error("Error inserting run:", err)
-    }
-  }, [user])
-
   if (!isLoaded || loading) {
     return (
       <div className="mx-auto flex max-w-4xl items-center justify-center px-4 py-32">
@@ -107,7 +97,13 @@ export default function DashboardPage() {
           </p>
         </div>
         <div className="flex items-center gap-4">
-          <AddRunModal onAddRun={handleAddRun} />
+          <Link
+            href="/run"
+            className="inline-flex items-center justify-center gap-2 rounded-md border border-cyan-500/30 bg-cyan-500/20 px-4 py-2 text-sm font-medium text-cyan-400 transition-all hover:bg-cyan-500/30"
+          >
+            <Play className="h-4 w-4 fill-cyan-400" />
+            Nueva Carrera
+          </Link>
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <div className="h-7 w-7 overflow-hidden rounded-full bg-muted">
               {user.imageUrl && (

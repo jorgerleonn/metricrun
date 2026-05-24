@@ -9,11 +9,13 @@ create table if not exists runs (
   notes text,
   cadence integer,
   stride_length_cm numeric(5,1),
+  route_data jsonb,
   created_at timestamptz not null default now()
 );
 
--- Migración: añadir user_id si la tabla ya existía sin ella
+-- Migración: añadir columnas si la tabla ya existía sin ellas
 alter table runs add column if not exists user_id text not null default '';
+alter table runs add column if not exists route_data jsonb;
 
 create index if not exists idx_runs_user_date on runs (user_id, date desc);
 

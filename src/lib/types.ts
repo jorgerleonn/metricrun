@@ -6,6 +6,28 @@ export interface Run {
   notes?: string
   cadence?: number
   strideLengthCm?: number
+  routeData?: RunRoute
+}
+
+export interface RoutePoint {
+  lat: number
+  lng: number
+  timestamp: number
+  accuracy?: number
+}
+
+export interface RunRoute {
+  points: RoutePoint[]
+  totalDistanceKm: number
+  totalDurationSeconds: number
+}
+
+export type TrackerStatus = "idle" | "requesting" | "recording" | "paused" | "finished" | "error"
+
+export interface LiveMetrics {
+  elapsedSeconds: number
+  distanceKm: number
+  currentPaceMinPerKm: number | null
 }
 
 export interface WeeklyStats {
