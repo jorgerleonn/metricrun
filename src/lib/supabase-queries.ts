@@ -53,20 +53,22 @@ export async function fetchRuns(userId: string): Promise<Run[]> {
 
 export async function insertRun(run: Omit<Run, "id">, userId: string): Promise<Run> {
   const supabase = getSupabase()
+  const payload: Record<string, unknown> = {
+    user_id: userId,
+    distance_km: run.distanceKm,
+    duration_seconds: run.durationSeconds,
+    date: run.date,
+  }
+  if (run.name) payload.name = run.name
+  if (run.notes) payload.notes = run.notes
+  if (run.cadence) payload.cadence = run.cadence
+  if (run.avgHeartRate) payload.avg_heart_rate = run.avgHeartRate
+  if (run.strideLengthCm) payload.stride_length_cm = run.strideLengthCm
+  if (run.routeData) payload.route_data = run.routeData
+
   const { data, error } = await supabase
     .from("runs")
-    .insert({
-      user_id: userId,
-      name: run.name ?? null,
-      distance_km: run.distanceKm,
-      duration_seconds: run.durationSeconds,
-      date: run.date,
-      notes: run.notes ?? null,
-      cadence: run.cadence ?? null,
-      avg_heart_rate: run.avgHeartRate ?? null,
-      stride_length_cm: run.strideLengthCm ?? null,
-      route_data: run.routeData ?? null,
-    } as never)
+    .insert(payload as never)
     .select()
     .single()
 

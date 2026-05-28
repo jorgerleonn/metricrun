@@ -211,7 +211,7 @@ export function PhotoUploadModal({ onAddRun }: PhotoUploadModalProps) {
                       />
                     </div>
 
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-3 gap-4">
                       <div className="space-y-2">
                         <Label htmlFor="photo-distance">Distancia (km)</Label>
                         <Input
@@ -235,6 +235,29 @@ export function PhotoUploadModal({ onAddRun }: PhotoUploadModalProps) {
                           onChange={(e) => setManualTime(e.target.value)}
                           pattern="^\d{1,2}:\d{2}:\d{2}$"
                           required
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="photo-pace">Ritmo Medio</Label>
+                        <Input
+                          id="photo-pace"
+                          type="text"
+                          readOnly
+                          tabIndex={-1}
+                          className="cursor-default opacity-80"
+                          placeholder="--:-- min/km"
+                          value={(() => {
+                            const d = parseFloat(manualDistance)
+                            if (!d || d <= 0) return ""
+                            const p = manualTime.split(":").map(Number)
+                            if (p.length !== 3 || p.some(isNaN)) return ""
+                            const totalSec = p[0] * 3600 + p[1] * 60 + p[2]
+                            if (totalSec <= 0) return ""
+                            const paceMin = totalSec / 60 / d
+                            const min = Math.floor(paceMin)
+                            const sec = Math.round((paceMin - min) * 60)
+                            return `${min}:${sec.toString().padStart(2, "0")} min/km`
+                          })()}
                         />
                       </div>
                     </div>
