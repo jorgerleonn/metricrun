@@ -1,10 +1,12 @@
 export interface Run {
   id: string
+  name?: string
   distanceKm: number
   durationSeconds: number
   date: string
   notes?: string
   cadence?: number
+  avgHeartRate?: number
   strideLengthCm?: number
   routeData?: RunRoute
 }

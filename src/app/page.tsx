@@ -1,13 +1,15 @@
 "use client"
 
-import { useEffect, useState } from "react"
-import { useUser } from "@clerk/nextjs"
+import { useEffect, useState, useCallback } from "react"
+import { useAuth } from "@/contexts/auth-context"
+import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { Route, TrendingUp, Calendar, Loader2, Play } from "lucide-react"
+import { Route, TrendingUp, Calendar, Loader2, Play, LogOut } from "lucide-react"
 import { MetricCard } from "@/components/MetricCard"
 import { RunListItem } from "@/components/RunListItem"
 import { WeeklyChart } from "@/components/WeeklyChart"
-import { fetchRuns } from "@/lib/supabase-queries"
+import { PhotoUploadModal } from "@/components/PhotoUploadModal"
+import { fetchRuns, insertRun } from "@/lib/supabase-queries"
 import { formatPace } from "@/lib/helpers"
 import type { Run, WeeklyStats, DailyDistance } from "@/lib/types"
 
@@ -45,13 +47,14 @@ function getDailyDistances(runs: Run[]): DailyDistance[] {
 }
 
 export default function DashboardPage() {
-  const { isLoaded, isSignedIn, user } = useUser()
+  const { user, loading: authLoading, signOut } = useAuth()
+  const router = useRouter()
   const [runs, setRuns] = useState<Run[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    if (!isLoaded) return
-    if (!isSignedIn || !user) {
+    if (authLoading) return
+    if (!user) {
       setLoading(false)
       return
     }
@@ -60,9 +63,27 @@ export default function DashboardPage() {
       .then(setRuns)
       .catch((err) => console.error("Error fetching runs:", err))
       .finally(() => setLoading(false))
-  }, [isLoaded, isSignedIn, user])
+  }, [authLoading, user])
 
-  if (!isLoaded || loading) {
+  const handleSignOut = async () => {
+    await signOut()
+    router.push("/sign-in")
+  }
+
+  const handleAddRun = useCallback(
+    async (run: Omit<Run, "id">) => {
+      if (!user) return
+      try {
+        const inserted = await insertRun(run, user.id)
+        setRuns((prev) => [inserted, ...prev])
+      } catch (err) {
+        console.error("Error saving run:", err)
+      }
+    },
+    [user]
+  )
+
+  if (authLoading || loading) {
     return (
       <div className="mx-auto flex max-w-4xl items-center justify-center px-4 py-32">
         <Loader2 className="h-8 w-8 animate-spin text-cyan-400" />
@@ -70,7 +91,7 @@ export default function DashboardPage() {
     )
   }
 
-  if (!isSignedIn) {
+  if (!user) {
     return (
       <div className="mx-auto flex max-w-4xl flex-col items-center justify-center px-4 py-32 text-center">
         <h1 className="mb-2 text-2xl font-bold">MetricRun</h1>
@@ -99,7 +120,8 @@ export default function DashboardPage() {
             Tus entrenamientos de running
           </p>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-2">
+          <PhotoUploadModal onAddRun={handleAddRun} />
           <Link
             href="/run"
             className="inline-flex items-center justify-center gap-2 rounded-md border border-cyan-500/30 bg-cyan-500/20 px-4 py-2 text-sm font-medium text-cyan-400 transition-all hover:bg-cyan-500/30"
@@ -108,16 +130,14 @@ export default function DashboardPage() {
             Nueva Carrera
           </Link>
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <div className="h-7 w-7 overflow-hidden rounded-full bg-muted">
-              {user.imageUrl && (
-                <img
-                  src={user.imageUrl}
-                  alt=""
-                  className="h-full w-full object-cover"
-                />
-              )}
-            </div>
-            <span className="hidden sm:inline">{user.firstName || user.emailAddresses[0]?.emailAddress}</span>
+            <span className="hidden sm:inline">{user.email}</span>
+            <button
+              onClick={handleSignOut}
+              className="flex h-7 w-7 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground"
+              title="Cerrar sesión"
+            >
+              <LogOut className="h-4 w-4" />
+            </button>
           </div>
         </div>
       </header>

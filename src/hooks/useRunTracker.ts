@@ -4,6 +4,11 @@ import { useState, useRef, useCallback, useEffect } from "react"
 import type { RoutePoint, TrackerStatus, LiveMetrics } from "@/lib/types"
 import { isGpsPointValid, calculateTotalDistance, calculatePace } from "@/lib/gps-utils"
 import { loadSession, saveSession, clearSession } from "@/lib/tracker-storage"
+import { BackgroundGeolocation } from "@/plugins/background-geolocation"
+
+function isNative(): boolean {
+  return typeof window !== "undefined" && !!(window as any).Capacitor?.isNativePlatform()
+}
 
 export function useRunTracker() {
   const [status, setStatus] = useState<TrackerStatus>("idle")
@@ -18,6 +23,7 @@ export function useRunTracker() {
   const savedSessionRef = useRef<ReturnType<typeof loadSession>>(null)
 
   const watchIdRef = useRef<number | null>(null)
+  const statusRef = useRef<TrackerStatus>("idle")
   const startTimeRef = useRef<number | null>(null)
   const elapsedPausedRef = useRef(0)
   const pauseStartRef = useRef<number | null>(null)
@@ -27,18 +33,19 @@ export function useRunTracker() {
   const paceWindowRef = useRef<RoutePoint[]>([])
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const checkpointRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const nativePollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const smoothCounterRef = useRef(0)
   const finishedResultRef = useRef<{
     points: RoutePoint[]
     totalDistanceKm: number
     totalDurationSeconds: number
   } | null>(null)
+  const lastNativeCountRef = useRef(0)
 
   const storeCheckpoint = useCallback(() => {
     const s = status
     if (s !== "recording" && s !== "paused") return
     if (!startTimeRef.current) return
-
     saveSession({
       positions: positionsRef.current,
       startTime: startTimeRef.current,
@@ -64,6 +71,13 @@ export function useRunTracker() {
     if (watchIdRef.current != null) {
       navigator.geolocation.clearWatch(watchIdRef.current)
       watchIdRef.current = null
+    }
+  }, [])
+
+  const stopNativePoll = useCallback(() => {
+    if (nativePollRef.current != null) {
+      clearInterval(nativePollRef.current)
+      nativePollRef.current = null
     }
   }, [])
 
@@ -114,44 +128,101 @@ export function useRunTracker() {
     tickRef.current = setInterval(tick, 1000)
   }, [tick])
 
+  const addPoint = useCallback((point: RoutePoint) => {
+    if (!isGpsPointValid(point, lastValidRef.current)) return
+
+    lastValidRef.current = point
+    smoothCounterRef.current++
+
+    if (smoothCounterRef.current % 2 === 0) return
+
+    const updated = [...positionsRef.current, point]
+    positionsRef.current = updated
+    paceWindowRef.current = [...paceWindowRef.current, point].slice(-10)
+    setPositions(updated)
+  }, [])
+
   const startWatching = useCallback(() => {
     watchIdRef.current = navigator.geolocation.watchPosition(
       (pos) => {
-        const point: RoutePoint = {
+        addPoint({
           lat: pos.coords.latitude,
           lng: pos.coords.longitude,
           timestamp: pos.timestamp,
           accuracy: pos.coords.accuracy ?? undefined,
-        }
-
-        if (!isGpsPointValid(point, lastValidRef.current)) return
-
-        lastValidRef.current = point
-        smoothCounterRef.current++
-
-        if (smoothCounterRef.current % 2 === 0) return
-
-        const updated = [...positionsRef.current, point]
-        positionsRef.current = updated
-        paceWindowRef.current = [...paceWindowRef.current, point].slice(-10)
-        setPositions(updated)
+        })
       },
       () => {},
-      {
-        enableHighAccuracy: true,
-        maximumAge: 0,
-        timeout: 10000,
-      }
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 },
     )
-  }, [])
+  }, [addPoint])
 
-  const start = useCallback(() => {
+  const startNativeTracking = useCallback(async () => {
+    try {
+      await BackgroundGeolocation.clearSession()
+      await BackgroundGeolocation.startTracking()
+      lastNativeCountRef.current = 0
+
+      nativePollRef.current = setInterval(async () => {
+        try {
+          const session = await BackgroundGeolocation.getSession()
+          const locs = session.locations
+          for (let i = lastNativeCountRef.current; i < locs.length; i++) {
+            const loc = locs[i]
+            addPoint({
+              lat: loc.lat,
+              lng: loc.lng,
+              timestamp: loc.timestamp,
+              accuracy: loc.accuracy,
+            })
+          }
+          lastNativeCountRef.current = locs.length
+        } catch {}
+      }, 3000)
+    } catch (e: any) {
+      console.warn("Native tracking failed, falling back to web:", e.message)
+      startWatching()
+    }
+  }, [addPoint, startWatching])
+
+  const stopNativeTracking = useCallback(async () => {
+    stopNativePoll()
+    try {
+      await BackgroundGeolocation.stopTracking()
+      const session = await BackgroundGeolocation.getSession()
+      for (const loc of session.locations) {
+        const exists = positionsRef.current.some(
+          (p) => p.timestamp === loc.timestamp && p.lat === loc.lat && p.lng === loc.lng,
+        )
+        if (!exists) {
+          positionsRef.current = [
+            ...positionsRef.current,
+            { lat: loc.lat, lng: loc.lng, timestamp: loc.timestamp, accuracy: loc.accuracy },
+          ]
+        }
+      }
+      setPositions([...positionsRef.current])
+      await BackgroundGeolocation.clearSession()
+    } catch {}
+  }, [stopNativePoll])
+
+  const clearWatchOrNative = useCallback(async () => {
+    if (isNative()) {
+      await stopNativeTracking()
+    } else {
+      clearWatch()
+    }
+  }, [clearWatch, stopNativeTracking])
+
+  const start = useCallback(async () => {
     setError(null)
     setStatus("requesting")
+    statusRef.current = "requesting"
 
-    if (!navigator.geolocation) {
+    if (!isNative() && !navigator.geolocation) {
       setError("Tu navegador no soporta geolocalización")
       setStatus("error")
+      statusRef.current = "error"
       return
     }
 
@@ -169,14 +240,19 @@ export function useRunTracker() {
     smoothCounterRef.current = 0
     finishedResultRef.current = null
 
-    startWatching()
+    if (isNative()) {
+      await startNativeTracking()
+    } else {
+      startWatching()
+    }
 
     setStatus("recording")
+    statusRef.current = "recording"
     startTicker()
     startCheckpointInterval()
-  }, [requestWakeLock, startTicker, startCheckpointInterval, startWatching])
+  }, [requestWakeLock, startTicker, startCheckpointInterval, startWatching, startNativeTracking])
 
-  const restore = useCallback(() => {
+  const restore = useCallback(async () => {
     const session = savedSessionRef.current
     if (!session) return
 
@@ -198,38 +274,59 @@ export function useRunTracker() {
 
     setPositions([...session.positions])
 
-    startWatching()
+    if (isNative()) {
+      await startNativeTracking()
+    } else {
+      startWatching()
+    }
+
     setStatus("recording")
+    statusRef.current = "recording"
     startTicker()
     startCheckpointInterval()
-  }, [requestWakeLock, startTicker, startCheckpointInterval, startWatching])
+  }, [requestWakeLock, startTicker, startCheckpointInterval, startWatching, startNativeTracking])
 
-  const pause = useCallback(() => {
+  const pause = useCallback(async () => {
     if (status !== "recording") return
-    clearWatch()
+    if (isNative()) {
+      await BackgroundGeolocation.stopTracking()
+    } else {
+      clearWatch()
+    }
     stopTicker()
     stopCheckpointInterval()
     pauseStartRef.current = Date.now()
 
     storeCheckpoint()
     setStatus("paused")
+    statusRef.current = "paused"
   }, [status, clearWatch, stopTicker, stopCheckpointInterval, storeCheckpoint])
 
-  const resume = useCallback(() => {
+  const resume = useCallback(async () => {
     if (status !== "paused") return
     if (pauseStartRef.current != null) {
       elapsedPausedRef.current += Date.now() - pauseStartRef.current
       pauseStartRef.current = null
     }
 
-    startWatching()
+    if (isNative()) {
+      await startNativeTracking()
+    } else {
+      startWatching()
+    }
+
     setStatus("recording")
+    statusRef.current = "recording"
     startTicker()
     startCheckpointInterval()
-  }, [status, startTicker, startCheckpointInterval, startWatching])
+  }, [status, startTicker, startCheckpointInterval, startWatching, startNativeTracking])
 
-  const stop = useCallback(() => {
-    clearWatch()
+  const stop = useCallback(async () => {
+    if (isNative()) {
+      await clearWatchOrNative()
+    } else {
+      clearWatch()
+    }
     stopTicker()
     stopCheckpointInterval()
     releaseWakeLock()
@@ -248,9 +345,10 @@ export function useRunTracker() {
 
     finishedResultRef.current = result
     setStatus("finished")
+    statusRef.current = "finished"
 
     return result
-  }, [clearWatch, stopTicker, stopCheckpointInterval, releaseWakeLock])
+  }, [clearWatch, stopTicker, stopCheckpointInterval, releaseWakeLock, clearWatchOrNative])
 
   const getFinishedResult = useCallback(() => {
     return finishedResultRef.current
@@ -289,9 +387,10 @@ export function useRunTracker() {
       clearWatch()
       stopTicker()
       stopCheckpointInterval()
+      stopNativePoll()
       releaseWakeLock()
     }
-  }, [clearWatch, stopTicker, stopCheckpointInterval, releaseWakeLock])
+  }, [clearWatch, stopTicker, stopCheckpointInterval, stopNativePoll, releaseWakeLock])
 
   return {
     status,

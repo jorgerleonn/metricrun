@@ -4,11 +4,13 @@ import type { Run, RunRoute } from "./types"
 interface RunRow {
   id: string
   user_id: string
+  name: string | null
   distance_km: number
   duration_seconds: number
   date: string
   notes: string | null
   cadence: number | null
+  avg_heart_rate: number | null
   stride_length_cm: number | null
   route_data: Record<string, unknown> | null
 }
@@ -25,11 +27,13 @@ function parseRouteData(raw: Record<string, unknown> | null): RunRoute | undefin
 function rowToRun(row: RunRow): Run {
   return {
     id: row.id,
+    name: row.name ?? undefined,
     distanceKm: row.distance_km,
     durationSeconds: row.duration_seconds,
     date: row.date,
     notes: row.notes ?? undefined,
     cadence: row.cadence ?? undefined,
+    avgHeartRate: row.avg_heart_rate ?? undefined,
     strideLengthCm: row.stride_length_cm ?? undefined,
     routeData: parseRouteData(row.route_data),
   }
@@ -53,11 +57,13 @@ export async function insertRun(run: Omit<Run, "id">, userId: string): Promise<R
     .from("runs")
     .insert({
       user_id: userId,
+      name: run.name ?? null,
       distance_km: run.distanceKm,
       duration_seconds: run.durationSeconds,
       date: run.date,
       notes: run.notes ?? null,
       cadence: run.cadence ?? null,
+      avg_heart_rate: run.avgHeartRate ?? null,
       stride_length_cm: run.strideLengthCm ?? null,
       route_data: run.routeData ?? null,
     } as never)

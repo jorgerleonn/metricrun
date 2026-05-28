@@ -1,6 +1,6 @@
 "use client"
 
-import { Clock, MapPin, Footprints } from "lucide-react"
+import { Clock, MapPin, Footprints, Heart } from "lucide-react"
 import type { Run } from "@/lib/types"
 import { formatDuration, formatPace } from "@/lib/helpers"
 import { cn } from "@/lib/utils"
@@ -21,9 +21,10 @@ export function RunListItem({ run }: RunListItemProps) {
       <div className="flex min-w-0 flex-1 items-center justify-between gap-4">
         <div className="min-w-0">
           <p className="truncate text-sm font-medium">
-            {run.distanceKm.toFixed(1)} km
+            {run.name ?? `${run.distanceKm.toFixed(1)} km`}
           </p>
           <div className="flex items-center gap-3 text-xs text-muted-foreground">
+            {run.name && <span>{run.distanceKm.toFixed(1)} km</span>}
             <span className="flex items-center gap-1">
               <Clock className="h-3 w-3" />
               {formatDuration(run.durationSeconds)}
@@ -36,6 +37,12 @@ export function RunListItem({ run }: RunListItemProps) {
         </div>
 
         <div className="flex shrink-0 items-center gap-3">
+          {run.avgHeartRate && (
+            <span className="hidden items-center gap-1 text-xs text-red-400 sm:inline-flex">
+              <Heart className="h-3 w-3" />
+              {run.avgHeartRate} ppm
+            </span>
+          )}
           {run.cadence && (
             <span className="hidden text-xs text-muted-foreground sm:inline">
               {run.cadence} spm

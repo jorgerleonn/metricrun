@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">MetricRun</string>
+    <string name="title_activity_main">MetricRun</string>
+    <string name="package_name">com.metricrun.app</string>
+    <string name="custom_url_scheme">com.metricrun.app</string>
+</resources>

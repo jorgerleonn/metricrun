@@ -3,7 +3,7 @@
 import { useState, useCallback } from "react"
 import dynamic from "next/dynamic"
 import { useRouter } from "next/navigation"
-import { useUser } from "@clerk/nextjs"
+import { useAuth } from "@/contexts/auth-context"
 import { Play, Pause, Square, Route, Loader2, AlertCircle, ChevronLeft } from "lucide-react"
 import { useRunTracker } from "@/hooks/useRunTracker"
 import { insertRun } from "@/lib/supabase-queries"
@@ -21,7 +21,7 @@ const MapView = dynamic(
 
 export default function RunTracker() {
   const router = useRouter()
-  const { user } = useUser()
+  const { user } = useAuth()
   const { status, positions, error, liveMetrics, hasSavedSession, start, restore, pause, resume, stop, getFinishedResult } = useRunTracker()
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
